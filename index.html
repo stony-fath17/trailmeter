@@ -64,7 +64,9 @@ header {
 .gps.poor i { background: var(--accent); }
 
 #map { flex: 1 1 auto; min-height: 180px; background: var(--line); }
-body.riding #map { flex: 0 0 30vh; }
+body.riding #map { display: none; }
+body.riding #ride { justify-content: center; gap: 20px; }
+body.riding .big .num { font-size: clamp(5rem, 28vw, 9rem); }
 
 .panel {
   background: var(--surface); border-top: 1px solid var(--line);
@@ -354,12 +356,6 @@ body.riding #map { flex: 0 0 30vh; }
     const acc = c.accuracy || 999;
     setGps(acc <= 20 ? 'good' : 'poor', `GPS ±${Math.round(acc * 3.28)} ft`);
 
-    if (!meMk) {
-      meRing = L.circle(ll, { radius: acc, weight: 0, fillColor: css('--accent'), fillOpacity: .15 }).addTo(map);
-      meMk = L.circleMarker(ll, { radius: 8, weight: 3, color: '#fff', fillColor: css('--accent'), fillOpacity: 1 }).addTo(map);
-    } else { meMk.setLatLng(ll); meRing.setLatLng(ll).setRadius(acc); }
-    map.panTo(ll, { animate: true });
-
     if (ride.paused) return;
 
     // Speed: phone-reported if available, else computed from the last fix.
@@ -429,7 +425,6 @@ body.riding #map { flex: 0 0 30vh; }
              moving: 0, anchor: null, lastFix: null, along: 0, left: plan.route ? plan.route.total : null, off: false, track: [] };
     document.body.classList.add('riding');
     $('plan').hidden = true; $('ride').hidden = false;
-    setTimeout(() => { map.invalidateSize(); map.setZoom(16); }, 50);
     setGps('poor', 'Finding GPS');
     watchId = navigator.geolocation.watchPosition(onFix, err => {
       setGps('', err.code === 1 ? 'Location blocked' : 'No GPS signal');

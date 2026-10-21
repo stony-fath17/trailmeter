@@ -37,6 +37,7 @@
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg); color: var(--ink); font: 16px/1.4 var(--font-body);
@@ -96,7 +97,7 @@ body.riding #map { flex: 0 0 30vh; }
 .msg { color: var(--warn); font-size: .9rem; margin: 0; }
 
 /* Ride readout */
-#ride { flex: 1 1 auto; overflow-y: auto; }
+#ride { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .hero { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .big { display: flex; flex-direction: column; }
 .label { font: 600 .8rem/1 var(--font-num); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }

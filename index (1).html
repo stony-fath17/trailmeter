@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Trailmeter">
+<meta name="theme-color" content="#0e1216">
+<title>Trailmeter</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: map fills the screen while planning; during a ride it shrinks under a big cycling-computer readout. */
+:root {
+  --bg: #eef1f4;
+  --surface: #ffffff;
+  --ink: #11161c;
+  --muted: #5b6673;
+  --line: #d5dbe1;
+  --accent: #e8590c;
+  --accent-ink: #ffffff;
+  --go: #1f8f4e;
+  --warn: #b42318;
+  --font-num: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1216; --surface: #171d23; --ink: #f1f4f7; --muted: #93a0ad;
+    --line: #2a333c; --accent: #ff7a2a; --accent-ink: #120a04; --go: #3ccf7a; --warn: #ff6b5e;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--ink); font: 16px/1.4 var(--font-body);
+  display: flex; flex-direction: column; overflow: hidden;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.brand { font: 700 1.5rem/1 var(--font-num); letter-spacing: .04em; text-transform: uppercase; }
+.brand span { color: var(--accent); }
+.gps { font: 600 .8rem/1 var(--font-num); letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+  display: flex; align-items: center; gap: 6px; }
+.gps i { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.gps.good i { background: var(--go); }
+.gps.poor i { background: var(--accent); }
+
+#map { flex: 1 1 auto; min-height: 180px; background: var(--line); }
+body.riding #map { flex: 0 0 30vh; }
+
+.panel {
+  background: var(--surface); border-top: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 12px;
+  padding-block: 14px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.row { display: flex; gap: 8px; align-items: center; }
+.pin { flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+  font: 700 .85rem/1 var(--font-num); color: #fff; }
+.pin.s { background: var(--go); }
+.pin.f { background: var(--ink); color: var(--surface); }
+.row input {
+  flex: 1 1 auto; min-width: 0; height: 44px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+}
+.btn {
+  height: 44px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg); font-weight: 600; white-space: nowrap;
+}
+.btn.on { border-color: var(--accent); color: var(--accent); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
+  font: 700 1.25rem/1 var(--font-num); letter-spacing: .06em; text-transform: uppercase; height: 54px; flex: 1; }
+.btn.ghost { background: transparent; }
+.hint { color: var(--muted); font-size: .9rem; margin: 0; }
+.summary { display: flex; align-items: baseline; gap: 8px; }
+.summary b { font: 700 2rem/1 var(--font-num); font-variant-numeric: tabular-nums; }
+.summary span { color: var(--muted); }
+.msg { color: var(--warn); font-size: .9rem; margin: 0; }
+
+/* Ride readout */
+#ride { flex: 1 1 auto; overflow-y: auto; }
+.hero { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.big { display: flex; flex-direction: column; }
+.label { font: 600 .8rem/1 var(--font-num); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.big .num { font: 700 clamp(4rem, 22vw, 7rem)/.9 var(--font-num); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.big .unit { font: 600 1rem/1 var(--font-num); color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.big.left .num { color: var(--accent); }
+.bar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+.bar div { height: 100%; width: 0%; background: var(--accent); transition: width .6s ease; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.stat { background: var(--surface); padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+.stat .v { font: 600 1.7rem/1 var(--font-num); font-variant-numeric: tabular-nums; }
+.offroute { background: var(--warn); color: #fff; border-radius: 8px; padding: 8px 12px; font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .bar div { transition: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Trail<span>meter</span></div>
+  <div class="gps" id="gps"><i></i><span id="gpsText">GPS off</span></div>
+</header>
+
+<div id="map" role="application" aria-label="Map. Tap to place the selected pin."></div>
+
+<section class="panel" id="plan">
+  <div class="row">
+    <div class="pin s" aria-hidden="true">S</div>
+    <input id="startQ" type="search" placeholder="Start: town, trailhead, or address" autocomplete="off">
+    <button class="btn" id="startGo">Find</button>
+  </div>
+  <div class="row">
+    <div class="pin f" aria-hidden="true">F</div>
+    <input id="finishQ" type="search" placeholder="Finish: town, trailhead, or address" autocomplete="off">
+    <button class="btn" id="finishGo">Find</button>
+  </div>
+  <div class="row">
+    <button class="btn on" id="tapStart">Tap map: Start</button>
+    <button class="btn" id="tapFinish">Tap map: Finish</button>
+    <button class="btn ghost" id="useMe">Start here</button>
+  </div>
+  <p class="hint" id="planHint">Search for each point, or pick a pin above and tap the map.</p>
+  <p class="msg" id="planMsg" hidden></p>
+  <div class="summary" id="summary" hidden><b id="routeMi">0.0</b><span id="routeNote">miles by bike route</span></div>
+  <div class="row">
+    <button class="btn primary" id="startRide">Start ride</button>
+  </div>
+</section>
+
+<section class="panel" id="ride" hidden>
+  <div class="offroute" id="offRoute" hidden>Off route. Miles left are measured from the nearest point on your route.</div>
+  <div class="hero">
+    <div class="big">
+      <span class="label">Speed</span>
+      <span class="num" id="speed">0.0</span>
+      <span class="unit">mph</span>
+    </div>
+    <div class="big left">
+      <span class="label">To finish</span>
+      <span class="num" id="left">--</span>
+      <span class="unit">miles left</span>
+    </div>
+  </div>
+  <div class="bar" aria-hidden="true"><div id="progress"></div></div>
+  <div class="stats">
+    <div class="stat"><span class="label">Ridden</span><span class="v" id="dist">0.00</span></div>
+    <div class="stat"><span class="label">Time</span><span class="v" id="time">0:00:00</span></div>
+    <div class="stat"><span class="label">Arrive</span><span class="v" id="eta">--</span></div>
+    <div class="stat"><span class="label">Avg mph</span><span class="v" id="avg">0.0</span></div>
+    <div class="stat"><span class="label">Max mph</span><span class="v" id="max">0.0</span></div>
+    <div class="stat"><span class="label">Done</span><span class="v" id="pct">0%</span></div>
+  </div>
+  <div class="row">
+    <button class="btn" id="pause" style="flex:1">Pause</button>
+    <button class="btn" id="endRide" style="flex:1">End ride</button>
+  </div>
+</section>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(() => {
+  const R = 6371000, M_PER_MI = 1609.344, MPH = 2.23694;
+  const $ = id => document.getElementById(id);
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+  // ---------- geometry ----------
+  const rad = d => d * Math.PI / 180;
+  function hav(a, b) {
+    const dLat = rad(b[0] - a[0]), dLng = rad(b[1] - a[1]);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+  // Nearest point on route: returns {along (m from start), off (m from route), i}
+  function project(p, route, fromAlong) {
+    const k = Math.cos(rad(p[0])) * R * Math.PI / 180, ky = R * Math.PI / 180;
+    const xy = c => [(c[1] - p[1]) * k, (c[0] - p[0]) * ky];
+    let best = null;
+    const scan = (minAlong) => {
+      for (let i = 0; i < route.coords.length - 1; i++) {
+        if (route.cum[i + 1] < minAlong) continue;
+        const A = xy(route.coords[i]), B = xy(route.coords[i + 1]);
+        const dx = B[0] - A[0], dy = B[1] - A[1], L2 = dx * dx + dy * dy;
+        let t = L2 ? -(A[0] * dx + A[1] * dy) / L2 : 0;
+        t = Math.max(0, Math.min(1, t));
+        const px = A[0] + t * dx, py = A[1] + t * dy, d = Math.hypot(px, py);
+        if (!best || d < best.off) best = { off: d, along: route.cum[i] + t * (route.cum[i + 1] - route.cum[i]), i };
+      }
+    };
+    // Prefer progress forward from where you were (handles out-and-back routes), fall back to whole route.
+    scan(Math.max(0, (fromAlong || 0) - 300));
+    if (!best || best.off > 150) { best = null; scan(0); }
+    return best;
+  }
+  function buildRoute(coords) {
+    const cum = [0];
+    for (let i = 1; i < coords.length; i++) cum.push(cum[i - 1] + hav(coords[i - 1], coords[i]));
+    return { coords, cum, total: cum[cum.length - 1] };
+  }
+
+  // ---------- storage ----------
+  const store = {
+    get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+  };
+
+  // ---------- map ----------
+  const map = L.map('map', { zoomControl: false, attributionControl: true }).setView([36.68, -97.31], 11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+  const plan = store.get('trailmeter.plan') || { start: null, finish: null, route: null };
+  let startMk = null, finishMk = null, routeLine = null, meMk = null, meRing = null, tapTarget = 'start';
+
+  function pinMarker(ll, kind) {
+    return L.circleMarker(ll, {
+      radius: 11, weight: 3, color: '#fff',
+      fillColor: kind === 'start' ? css('--go') : css('--ink'), fillOpacity: 1
+    }).addTo(map);
+  }
+  function drawPins() {
+    if (startMk) { map.removeLayer(startMk); startMk = null; }
+    if (finishMk) { map.removeLayer(finishMk); finishMk = null; }
+    if (plan.start) startMk = pinMarker(plan.start.ll, 'start');
+    if (plan.finish) finishMk = pinMarker(plan.finish.ll, 'finish');
+    $('startQ').value = plan.start ? plan.start.label : '';
+    $('finishQ').value = plan.finish ? plan.finish.label : '';
+  }
+  function drawRoute() {
+    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    if (!plan.route) { $('summary').hidden = true; return; }
+    routeLine = L.polyline(plan.route.coords, { color: css('--accent'), weight: 6, opacity: .9 }).addTo(map);
+    $('summary').hidden = false;
+    $('routeMi').textContent = (plan.route.total / M_PER_MI).toFixed(1);
+    $('routeNote').textContent = plan.route.straight ? 'miles in a straight line (no bike route found)' : 'miles by bike route';
+  }
+  function fit() {
+    if (routeLine) map.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
+    else if (plan.start && plan.finish) map.fitBounds([plan.start.ll, plan.finish.ll], { padding: [40, 40] });
+    else if (plan.start) map.setView(plan.start.ll, 14);
+    else if (plan.finish) map.setView(plan.finish.ll, 14);
+  }
+  function showMsg(t) { $('planMsg').textContent = t; $('planMsg').hidden = !t; }
+
+  async function routeBetween() {
+    showMsg('');
+    plan.route = null;
+    if (!(plan.start && plan.finish)) { drawRoute(); save(); return; }
+    $('routeMi').textContent = '…'; $('summary').hidden = false; $('routeNote').textContent = 'finding bike route';
+    const a = plan.start.ll, b = plan.finish.ll;
+    try {
+      const url = `https://routing.openstreetmap.de/routed-bike/route/v1/bike/${a[1]},${a[0]};${b[1]},${b[0]}?overview=full&geometries=geojson`;
+      const r = await fetch(url);
+      const j = await r.json();
+      if (!j.routes || !j.routes.length) throw new Error('no route');
+      const coords = j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+      plan.route = buildRoute(coords);
+    } catch (e) {
+      plan.route = buildRoute([a, b]);
+      plan.route.straight = true;
+      showMsg('Could not reach the bike routing service, so this is a straight-line distance. Check your signal and move a pin to try again.');
+    }
+    drawRoute(); fit(); save();
+  }
+  function save() { store.set('trailmeter.plan', plan); }
+
+  function setPoint(kind, ll, label) {
+    plan[kind] = { ll: [ll[0], ll[1]], label };
+    drawPins(); routeBetween();
+  }
+
+  async function geocode(kind) {
+    const q = $(kind + 'Q').value.trim();
+    if (!q) return;
+    showMsg('');
+    try {
+      const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q));
+      const j = await r.json();
+      if (!j.length) { showMsg(`No place found for "${q}". Try adding the town and state.`); return; }
+      const label = j[0].display_name.split(',').slice(0, 3).join(',');
+      setPoint(kind, [+j[0].lat, +j[0].lon], label);
+      if (!plan[kind === 'start' ? 'finish' : 'start']) map.setView([+j[0].lat, +j[0].lon], 13);
+    } catch { showMsg('Search is unavailable right now. Tap the map to place the pin instead.'); }
+  }
+
+  function setTap(kind) {
+    tapTarget = kind;
+    $('tapStart').classList.toggle('on', kind === 'start');
+    $('tapFinish').classList.toggle('on', kind === 'finish');
+  }
+  map.on('click', e => {
+    if (document.body.classList.contains('riding')) return;
+    const ll = [e.latlng.lat, e.latlng.lng];
+    setPoint(tapTarget, ll, `Pin ${ll[0].toFixed(4)}, ${ll[1].toFixed(4)}`);
+    if (tapTarget === 'start' && !plan.finish) setTap('finish');
+  });
+  $('tapStart').onclick = () => setTap('start');
+  $('tapFinish').onclick = () => setTap('finish');
+  $('startGo').onclick = () => geocode('start');
+  $('finishGo').onclick = () => geocode('finish');
+  $('startQ').addEventListener('keydown', e => { if (e.key === 'Enter') geocode('start'); });
+  $('finishQ').addEventListener('keydown', e => { if (e.key === 'Enter') geocode('finish'); });
+  $('useMe').onclick = () => {
+    if (!navigator.geolocation) { showMsg('This browser cannot read your location.'); return; }
+    navigator.geolocation.getCurrentPosition(
+      p => { setPoint('start', [p.coords.latitude, p.coords.longitude], 'My location'); setTap('finish'); },
+      () => showMsg('Location is blocked. In iPhone Settings, allow Location for Safari, then try again.'),
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  };
+
+  // ---------- ride ----------
+  let watchId = null, wakeLock = null, tick = null;
+  let ride = null;
+
+  function fmtTime(ms) {
+    const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, ss = s % 60;
+    return `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  }
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && ride) keepAwake();
+  });
+
+  function setGps(state, text) {
+    $('gps').className = 'gps ' + state; $('gpsText').textContent = text;
+  }
+
+  function onFix(p) {
+    if (!ride) return;
+    const c = p.coords, now = p.timestamp || Date.now();
+    const ll = [c.latitude, c.longitude];
+    const acc = c.accuracy || 999;
+    setGps(acc <= 20 ? 'good' : 'poor', `GPS ±${Math.round(acc * 3.28)} ft`);
+
+    if (!meMk) {
+      meRing = L.circle(ll, { radius: acc, weight: 0, fillColor: css('--accent'), fillOpacity: .15 }).addTo(map);
+      meMk = L.circleMarker(ll, { radius: 8, weight: 3, color: '#fff', fillColor: css('--accent'), fillOpacity: 1 }).addTo(map);
+    } else { meMk.setLatLng(ll); meRing.setLatLng(ll).setRadius(acc); }
+    map.panTo(ll, { animate: true });
+
+    if (ride.paused) return;
+
+    // Speed: phone-reported if available, else computed from the last fix.
+    let v = (c.speed != null && c.speed >= 0) ? c.speed : null;
+    if (v == null && ride.lastFix) {
+      const dt = (now - ride.lastFix.t) / 1000;
+      if (dt > 0) v = hav(ride.lastFix.ll, ll) / dt;
+    }
+    if (v == null || acc > 50) v = ride.speed * 0.7;
+    if (v < 0.45) v = 0; // ~1 mph: treat as stopped
+    ride.speed = ride.speed ? ride.speed * 0.4 + v * 0.6 : v;
+    if (ride.speed < 0.45) ride.speed = 0;
+    if (acc <= 30 && ride.speed > ride.max) ride.max = ride.speed;
+
+    // Distance: add only real movement with decent accuracy, so GPS drift at a stop doesn't count.
+    if (acc <= 30) {
+      if (ride.anchor) {
+        const d = hav(ride.anchor.ll, ll), dt = (now - ride.anchor.t) / 1000;
+        if (d >= Math.max(5, acc * 0.5) && d / Math.max(dt, 1) < 25) {
+          ride.dist += d;
+          ride.moving += Math.min(dt, 30) * 1000;
+          ride.anchor = { ll, t: now };
+          ride.track.push(ll);
+        }
+      } else ride.anchor = { ll, t: now };
+    }
+    ride.lastFix = { ll, t: now };
+
+    // Miles left along the planned route.
+    if (plan.route && acc <= 60) {
+      const pr = project(ll, plan.route, ride.along);
+      if (pr) {
+        ride.along = pr.along;
+        ride.left = Math.max(0, plan.route.total - pr.along);
+        ride.off = pr.off > 100;
+      }
+    }
+    render();
+  }
+
+  function render() {
+    if (!ride) return;
+    $('speed').textContent = (ride.speed * MPH).toFixed(1);
+    $('dist').textContent = (ride.dist / M_PER_MI).toFixed(2);
+    $('max').textContent = (ride.max * MPH).toFixed(1);
+    const avg = ride.moving > 0 ? ride.dist / (ride.moving / 1000) : 0;
+    $('avg').textContent = (avg * MPH).toFixed(1);
+    if (plan.route && ride.left != null) {
+      const mi = ride.left / M_PER_MI;
+      $('left').textContent = mi >= 10 ? mi.toFixed(1) : mi.toFixed(2);
+      const pct = Math.min(100, Math.max(0, 100 * (1 - ride.left / plan.route.total)));
+      $('progress').style.width = pct + '%';
+      $('pct').textContent = Math.round(pct) + '%';
+      $('offRoute').hidden = !ride.off;
+      if (avg > 0.5 && ride.left > 0) {
+        const at = new Date(Date.now() + ride.left / avg * 1000);
+        $('eta').textContent = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(/\s?[AP]M/i, m => m.trim().toLowerCase()[0]);
+      } else $('eta').textContent = ride.left === 0 ? 'Here' : '--';
+    } else {
+      $('left').textContent = '--';
+    }
+  }
+
+  function startRide() {
+    if (!navigator.geolocation) { showMsg('This browser cannot read your location.'); return; }
+    ride = { started: Date.now(), pausedMs: 0, pausedAt: null, paused: false, speed: 0, max: 0, dist: 0,
+             moving: 0, anchor: null, lastFix: null, along: 0, left: plan.route ? plan.route.total : null, off: false, track: [] };
+    document.body.classList.add('riding');
+    $('plan').hidden = true; $('ride').hidden = false;
+    setTimeout(() => { map.invalidateSize(); map.setZoom(16); }, 50);
+    setGps('poor', 'Finding GPS');
+    watchId = navigator.geolocation.watchPosition(onFix, err => {
+      setGps('', err.code === 1 ? 'Location blocked' : 'No GPS signal');
+    }, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+    keepAwake();
+    tick = setInterval(() => {
+      if (!ride) return;
+      const now = ride.paused ? ride.pausedAt : Date.now();
+      $('time').textContent = fmtTime(now - ride.started - ride.pausedMs);
+    }, 1000);
+    render();
+  }
+  function endRide() {
+    if (watchId != null) navigator.geolocation.clearWatch(watchId);
+    watchId = null; clearInterval(tick);
+    try { wakeLock && wakeLock.release(); } catch {}
+    wakeLock = null;
+    if (ride) {
+      store.set('trailmeter.lastRide', { date: new Date().toISOString(), miles: ride.dist / M_PER_MI,
+        movingMin: ride.moving / 60000, maxMph: ride.max * MPH });
+    }
+    ride = null;
+    if (meMk) { map.removeLayer(meMk); map.removeLayer(meRing); meMk = meRing = null; }
+    document.body.classList.remove('riding');
+    $('ride').hidden = true; $('plan').hidden = false;
+    $('pause').textContent = 'Pause'; $('endRide').textContent = 'End ride';
+    setGps('', 'GPS off');
+    setTimeout(() => { map.invalidateSize(); fit(); }, 50);
+  }
+  $('startRide').onclick = startRide;
+  $('pause').onclick = () => {
+    if (!ride) return;
+    ride.paused = !ride.paused;
+    if (ride.paused) { ride.pausedAt = Date.now(); ride.speed = 0; render(); $('pause').textContent = 'Resume'; }
+    else { ride.pausedMs += Date.now() - ride.pausedAt; ride.pausedAt = null; ride.anchor = null; ride.lastFix = null; $('pause').textContent = 'Pause'; }
+  };
+  // Two-tap end so a bump on the handlebars doesn't end the ride.
+  let endArmed = null;
+  $('endRide').onclick = () => {
+    if (endArmed) { clearTimeout(endArmed); endArmed = null; endRide(); return; }
+    $('endRide').textContent = 'Tap again to end';
+    endArmed = setTimeout(() => { endArmed = null; $('endRide').textContent = 'End ride'; }, 3000);
+  };
+
+  // ---------- boot ----------
+  drawPins(); drawRoute(); fit();
+  if (plan.start && !plan.finish) setTap('finish');
+})();
+</script>
+</body>
+</html>

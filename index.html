@@ -269,12 +269,27 @@ body.riding .big .num { font-size: clamp(5rem, 28vw, 9rem); }
     if (!(plan.start && plan.finish)) { drawRoute(); save(); return; }
     $('routeMi').textContent = '…'; $('summary').hidden = false; $('routeNote').textContent = 'finding bike route';
     const a = plan.start.ll, b = plan.finish.ll;
-    try {
+    // 1st choice: BRouter "trekking" profile, which strongly favors bike paths, rail-trails and marked bike routes.
+    // 2nd choice: OSRM bike routing. Last resort: straight line.
+    const tryBRouter = async () => {
+      const url = `https://brouter.de/brouter?lonlats=${a[1]},${a[0]}|${b[1]},${b[0]}&profile=trekking&alternativeidx=0&format=geojson`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('brouter ' + r.status);
+      const j = await r.json();
+      const f = j.features && j.features[0];
+      if (!f) throw new Error('no route');
+      return f.geometry.coordinates.map(c => [c[1], c[0]]);
+    };
+    const tryOSRM = async () => {
       const url = `https://routing.openstreetmap.de/routed-bike/route/v1/bike/${a[1]},${a[0]};${b[1]},${b[0]}?overview=full&geometries=geojson`;
       const r = await fetch(url);
       const j = await r.json();
       if (!j.routes || !j.routes.length) throw new Error('no route');
-      const coords = j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+      return j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+    };
+    try {
+      let coords;
+      try { coords = await tryBRouter(); } catch { coords = await tryOSRM(); }
       plan.route = buildRoute(coords);
     } catch (e) {
       plan.route = buildRoute([a, b]);
@@ -452,7 +467,10 @@ body.riding .big .num { font-size: clamp(5rem, 28vw, 9rem); }
     $('ride').hidden = true; $('plan').hidden = false;
     $('pause').textContent = 'Pause'; $('endRide').textContent = 'End ride';
     setGps('', 'GPS off');
-    setTimeout(() => { map.invalidateSize(); fit(); }, 50);
+    // Clear the plan so the next ride starts fresh.
+    plan.start = null; plan.finish = null; plan.route = null;
+    save(); drawPins(); drawRoute(); showMsg(''); setTap('start');
+    setTimeout(() => { map.invalidateSize(); }, 50);
   }
   $('startRide').onclick = startRide;
   $('pause').onclick = () => {

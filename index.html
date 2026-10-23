@@ -80,6 +80,9 @@ body.riding #map { display: none; }
 .loglist dt { color: var(--muted); font: 600 .9rem/1.2 var(--font-num); letter-spacing: .1em; text-transform: uppercase; align-self: center; }
 .loglist dd { font: 600 1.6rem/1 var(--font-num); font-variant-numeric: tabular-nums; text-align: right; }
 body.riding #ride { justify-content: center; gap: 20px; }
+/* Miles to go sits dead center; the other stats and buttons stay at the bottom. */
+#ride .big.left { flex: 1 1 auto; align-items: center; justify-content: center; text-align: center; gap: 8px; }
+#ride .big.left .label { font-size: 1rem; }
 body.riding .big .num { font-size: clamp(6rem, 34vw, 11rem); }
 body.riding .stat { padding: 14px 10px; }
 body.riding .stat .v { font-size: clamp(2.2rem, 10vw, 3.5rem); }

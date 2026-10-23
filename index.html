@@ -64,9 +64,25 @@ header {
 .gps.poor i { background: var(--accent); }
 
 #map { flex: 1 1 auto; min-height: 180px; background: var(--line); }
+/* Ride screen is always pure black: OLED iPhones turn black pixels off, which saves battery. */
+body.riding {
+  --bg: #000; --surface: #000; --ink: #f1f4f7; --muted: #8a96a3;
+  --line: #1c2229; --accent: #ff7a2a; --accent-ink: #120a04; --go: #3ccf7a; --warn: #ff6b5e;
+  color-scheme: dark;
+}
+html:has(body.riding) { background: #000; }
+body.riding .btn { background: #000; }
 body.riding #map { display: none; }
+#log { flex: 1 1 auto; min-height: 0; overflow-y: auto; gap: 14px; }
+.logroute { margin: 0; font: 700 1.6rem/1.15 var(--font-num); text-wrap: balance; overflow-wrap: anywhere; }
+.loglist { display: grid; grid-template-columns: 1fr auto; margin: 0; border-top: 1px solid var(--line); }
+.loglist dt, .loglist dd { margin: 0; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.loglist dt { color: var(--muted); font: 600 .9rem/1.2 var(--font-num); letter-spacing: .1em; text-transform: uppercase; align-self: center; }
+.loglist dd { font: 600 1.6rem/1 var(--font-num); font-variant-numeric: tabular-nums; text-align: right; }
 body.riding #ride { justify-content: center; gap: 20px; }
-body.riding .big .num { font-size: clamp(5rem, 28vw, 9rem); }
+body.riding .big .num { font-size: clamp(6rem, 34vw, 11rem); }
+body.riding .stat { padding: 14px 10px; }
+body.riding .stat .v { font-size: clamp(2.2rem, 10vw, 3.5rem); }
 
 .panel {
   background: var(--surface); border-top: 1px solid var(--line);
@@ -149,30 +165,32 @@ body.riding .big .num { font-size: clamp(5rem, 28vw, 9rem); }
 
 <section class="panel" id="ride" hidden>
   <div class="offroute" id="offRoute" hidden>Off route. Miles left are measured from the nearest point on your route.</div>
-  <div class="hero">
-    <div class="big">
-      <span class="label">Speed</span>
-      <span class="num" id="speed">0.0</span>
-      <span class="unit">mph</span>
-    </div>
-    <div class="big left">
-      <span class="label">To finish</span>
-      <span class="num" id="left">--</span>
-      <span class="unit">miles left</span>
-    </div>
+  <div class="big left">
+    <span class="label">Miles to go</span>
+    <span class="num" id="left">--</span>
   </div>
-  <div class="bar" aria-hidden="true"><div id="progress"></div></div>
   <div class="stats">
-    <div class="stat"><span class="label">Ridden</span><span class="v" id="dist">0.00</span></div>
-    <div class="stat"><span class="label">Time</span><span class="v" id="time">0:00:00</span></div>
+    <div class="stat"><span class="label">Miles ridden</span><span class="v" id="dist">0.00</span></div>
+    <div class="stat"><span class="label">Left</span><span class="v" id="pct">100%</span></div>
     <div class="stat"><span class="label">Arrive</span><span class="v" id="eta">--</span></div>
-    <div class="stat"><span class="label">Avg mph</span><span class="v" id="avg">0.0</span></div>
-    <div class="stat"><span class="label">Max mph</span><span class="v" id="max">0.0</span></div>
-    <div class="stat"><span class="label">Done</span><span class="v" id="pct">0%</span></div>
   </div>
   <div class="row">
     <button class="btn" id="pause" style="flex:1">Pause</button>
     <button class="btn" id="endRide" style="flex:1">End ride</button>
+  </div>
+</section>
+
+<section class="panel" id="log" hidden>
+  <span class="label">Trip log</span>
+  <h2 class="logroute" id="logRoute"></h2>
+  <p class="hint" id="logWhen"></p>
+  <div class="big left">
+    <span class="label">Miles ridden</span>
+    <span class="num" id="logMiles">0.00</span>
+  </div>
+  <dl class="loglist" id="logList"></dl>
+  <div class="row">
+    <button class="btn primary" id="closeLog">Close trip log</button>
   </div>
 </section>
 
@@ -349,6 +367,10 @@ body.riding .big .num { font-size: clamp(5rem, 28vw, 9rem); }
   let watchId = null, wakeLock = null, tick = null;
   let ride = null;
 
+  function setThemeColor(c) {
+    const m = document.querySelector('meta[name="theme-color"]');
+    if (m) m.setAttribute('content', c);
+  }
   function fmtTime(ms) {
     const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, ss = s % 60;
     return `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
@@ -413,17 +435,13 @@ body.riding .big .num { font-size: clamp(5rem, 28vw, 9rem); }
 
   function render() {
     if (!ride) return;
-    $('speed').textContent = (ride.speed * MPH).toFixed(1);
     $('dist').textContent = (ride.dist / M_PER_MI).toFixed(2);
-    $('max').textContent = (ride.max * MPH).toFixed(1);
     const avg = ride.moving > 0 ? ride.dist / (ride.moving / 1000) : 0;
-    $('avg').textContent = (avg * MPH).toFixed(1);
     if (plan.route && ride.left != null) {
       const mi = ride.left / M_PER_MI;
       $('left').textContent = mi >= 10 ? mi.toFixed(1) : mi.toFixed(2);
-      const pct = Math.min(100, Math.max(0, 100 * (1 - ride.left / plan.route.total)));
-      $('progress').style.width = pct + '%';
-      $('pct').textContent = Math.round(pct) + '%';
+      const pctLeft = Math.min(100, Math.max(0, 100 * ride.left / plan.route.total));
+      $('pct').textContent = Math.round(pctLeft) + '%';
       $('offRoute').hidden = !ride.off;
       if (avg > 0.5 && ride.left > 0) {
         const at = new Date(Date.now() + ride.left / avg * 1000);
@@ -439,17 +457,14 @@ body.riding .big .num { font-size: clamp(5rem, 28vw, 9rem); }
     ride = { started: Date.now(), pausedMs: 0, pausedAt: null, paused: false, speed: 0, max: 0, dist: 0,
              moving: 0, anchor: null, lastFix: null, along: 0, left: plan.route ? plan.route.total : null, off: false, track: [] };
     document.body.classList.add('riding');
+    setThemeColor('#000000');
     $('plan').hidden = true; $('ride').hidden = false;
     setGps('poor', 'Finding GPS');
     watchId = navigator.geolocation.watchPosition(onFix, err => {
       setGps('', err.code === 1 ? 'Location blocked' : 'No GPS signal');
     }, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
     keepAwake();
-    tick = setInterval(() => {
-      if (!ride) return;
-      const now = ride.paused ? ride.pausedAt : Date.now();
-      $('time').textContent = fmtTime(now - ride.started - ride.pausedMs);
-    }, 1000);
+    tick = setInterval(render, 15000); // keeps the arrival time fresh while stopped
     render();
   }
   function endRide() {
@@ -457,21 +472,74 @@ body.riding .big .num { font-size: clamp(5rem, 28vw, 9rem); }
     watchId = null; clearInterval(tick);
     try { wakeLock && wakeLock.release(); } catch {}
     wakeLock = null;
+    let log = null;
     if (ride) {
-      store.set('trailmeter.lastRide', { date: new Date().toISOString(), miles: ride.dist / M_PER_MI,
-        movingMin: ride.moving / 60000, maxMph: ride.max * MPH });
+      const end = ride.paused ? ride.pausedAt : Date.now();
+      const total = Math.max(0, end - ride.started);
+      log = {
+        from: plan.start ? plan.start.label : 'Start',
+        to: plan.finish ? plan.finish.label : 'Finish',
+        started: ride.started, ended: end, totalMs: total,
+        movingMs: Math.min(ride.moving, total),
+        miles: ride.dist / M_PER_MI,
+        routeMiles: plan.route ? plan.route.total / M_PER_MI : null,
+        leftMiles: ride.left != null ? ride.left / M_PER_MI : null,
+        maxMph: ride.max * MPH
+      };
     }
     ride = null;
     if (meMk) { map.removeLayer(meMk); map.removeLayer(meRing); meMk = meRing = null; }
-    document.body.classList.remove('riding');
-    $('ride').hidden = true; $('plan').hidden = false;
+    $('ride').hidden = true;
     $('pause').textContent = 'Pause'; $('endRide').textContent = 'End ride';
     setGps('', 'GPS off');
     // Clear the plan so the next ride starts fresh.
     plan.start = null; plan.finish = null; plan.route = null;
     save(); drawPins(); drawRoute(); showMsg(''); setTap('start');
-    setTimeout(() => { map.invalidateSize(); }, 50);
+    if (log) { store.set('trailmeter.openLog', log); showLog(log); }
+    else closeLog();
   }
+
+  // ---------- trip log ----------
+  function showLog(log) {
+    document.body.classList.add('riding');
+    setThemeColor('#000000');
+    $('plan').hidden = true; $('ride').hidden = true; $('log').hidden = false;
+    const short = s => s.split(',')[0];
+    $('logRoute').textContent = `${short(log.from)} to ${short(log.to)}`;
+    const t = ms => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    $('logWhen').textContent = new Date(log.started).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
+      + ` · ${t(log.started)} to ${t(log.ended)}`;
+    $('logMiles').textContent = log.miles.toFixed(2);
+    const hm = ms => { const m = Math.round(ms / 60000); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
+    const avg = log.movingMs > 0 ? log.miles / (log.movingMs / 3600000) : 0;
+    const rows = [];
+    if (log.routeMiles != null) {
+      rows.push(['Route length', log.routeMiles.toFixed(1) + ' mi']);
+      const done = log.leftMiles != null ? Math.max(0, Math.min(100, 100 * (1 - log.leftMiles / log.routeMiles))) : 0;
+      rows.push(['Completed', log.leftMiles != null && log.leftMiles < 0.1 ? 'Finished' : Math.round(done) + '%']);
+      if (log.leftMiles != null && log.leftMiles >= 0.1) rows.push(['Miles short', log.leftMiles.toFixed(1) + ' mi']);
+    }
+    rows.push(['Total time', hm(log.totalMs)]);
+    rows.push(['Moving time', hm(log.movingMs)]);
+    rows.push(['Stopped time', hm(log.totalMs - log.movingMs)]);
+    rows.push(['Avg moving speed', avg.toFixed(1) + ' mph']);
+    rows.push(['Top speed', log.maxMph.toFixed(1) + ' mph']);
+    const dl = $('logList'); dl.textContent = '';
+    rows.forEach(([k, v]) => {
+      const dt = document.createElement('dt'); dt.textContent = k;
+      const dd = document.createElement('dd'); dd.textContent = v;
+      dl.append(dt, dd);
+    });
+    $('log').scrollTop = 0;
+  }
+  function closeLog() {
+    try { localStorage.removeItem('trailmeter.openLog'); } catch {}
+    document.body.classList.remove('riding');
+    setThemeColor('#0e1216');
+    $('log').hidden = true; $('ride').hidden = true; $('plan').hidden = false;
+    setTimeout(() => { map.invalidateSize(); fit(); }, 50);
+  }
+  $('closeLog').onclick = closeLog;
   $('startRide').onclick = startRide;
   $('pause').onclick = () => {
     if (!ride) return;
@@ -490,6 +558,9 @@ body.riding .big .num { font-size: clamp(5rem, 28vw, 9rem); }
   // ---------- boot ----------
   drawPins(); drawRoute(); fit();
   if (plan.start && !plan.finish) setTap('finish');
+  // A trip log stays up until it is closed, even if the app was closed in between.
+  const openLog = store.get('trailmeter.openLog');
+  if (openLog) showLog(openLog);
 })();
 </script>
 </body>
